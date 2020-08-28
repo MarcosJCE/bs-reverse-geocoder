@@ -6,17 +6,14 @@ import reverse_geocoder as rg
 import time
 import io
 import requests
-import time
 import datetime
 import math
-import datetime
+
 
 
 #################
 # PREPROCESSING #
 #################
-
-
 
 #%% LEER DATOS ORIGINALES ###
 
@@ -53,11 +50,10 @@ print(allCountries.loc[allCountries['population']<0,'featureclass'])
 
 #%% LIMPIAR DATOS ###
 
-# CON c500
-
+## CON c500
 b = c500.shape[0]
 
-# Remove duplicates: samehttp://api.geonames.org/countryCode?lat=47.03&lng=10.2&username=marcoscastillo (lat,lon)
+# Remove duplicates: same (lat,lon)
 c500.drop_duplicates(subset=['latitude','longitude'], inplace=True)
 
 # Remove rows with nas in lat, lon or cc
@@ -69,7 +65,7 @@ a = c500.shape[0]
 print('{} rows removed'.format(b-a)) # 184
 
 
-# CON allCountries
+## CON allCountries
 b = allCountries.shape[0]
 
 # Nos quedamos solo con las localizaciones pobladas (featureclass = P).
@@ -86,10 +82,10 @@ allCountries = allCountries.loc[mask,:]
 a = allCountries.shape[0]
 print('{} rows removed'.format(b-a)) # 7.3M
 
-
-
 #%% GUARDAR PKLS
 
+# Para ahorrarnos el tiempo y leerlos así directamente la próxima vez, como
+# hacemos en la siguiente celda
 allCountries.to_pickle("./allCountries.pkl")
 c500.to_pickle("./c500.pkl")
 rg1000.to_pickle("./rg1000.pkl")
@@ -105,8 +101,6 @@ allCountries = pd.read_pickle('./allCountries.pkl')
 #############
 # PRECISIÓN #
 #############
-
-
 
 #%% TESTEAR CON c500 - rg1000
 
@@ -148,18 +142,15 @@ print(np.sum(have_different_cc)) # 7/1094 errores
 
 # Filtro allCountries para que las filas que queden, en principio, no estén en 
 # rg1000 y solo haya municipios (no montañas, ni ríos...)
-# def all_conditions_ok(row):
-#     result = False
-#     if row['population'] <= 1000:
-#         if row['featurecode'] not in ['PPL','PPLA','PPLA2','PPLA3']:
-#             result = True
-#     return result
+def all_conditions_ok(row):
+    result = False
+    if row['population'] <= 1000:
+        if row['featurecode'] not in ['PPL','PPLA','PPLA2','PPLA3']:
+            result = True
+    return result
     
-# mask = allCountries.apply(all_conditions_ok, axis=1)
-# filtered = allCountries.loc[mask, :].copy()
-# filtered.to_pickle('allCountries_filtered_rg_cities1000.pkl')
-
-filtered = pd.read_pickle('allCountries_filtered_rg_cities1000.pkl')
+mask = allCountries.apply(all_conditions_ok, axis=1)
+filtered = allCountries.loc[mask, :].copy()
 
 # Para asegurarme de que no queda ninguna fila que esté en rg1000, elimino
 # también las que coindidan con ciudad y país
@@ -190,9 +181,12 @@ print(np.sum(have_different_cc)) # 10k/320k errores
 # TIEMPO COMPUTACIONAL #
 ########################
 
+# Con muchísimas coordenadas, más de las que tendría tratar en una situación 
+# real
 
+#%% Con muchísimas coordenadas, más que en situación real 
 
-#%% CON rg_cities1000 COMO BASE DE DATOS
+#!!! La máquina peta si le metes muchas coords. 
 
 ncoords = [int(10**i) for i in range(8)]
 many_coords = coords*40 # size ~12M
@@ -203,163 +197,28 @@ for n in ncoords:
     results = rg.search(choosen_coords)
     time_elapsed = time.perf_counter() - start_time
     print('{} & {:.2f}'.format(n, time_elapsed))
-    
-# Podemos permitirnos sacrificar performance para ganar precisión: 10M en solo
-# 12.8 segundos, en una máquina poco potente.
 
-#%% Con c500 COMO BASE DE DATOS
 
-#!!! La máquina peta si le metes muchas coords. 
-
-stream = io.StringIO(open('c500_stream.csv', encoding='utf-8').read())
-geo = rg.RGeocoder(mode=2, verbose=True, stream=stream)
-
-ncoords = [int(10**i) for i in range(8)]
-many_coords = coords*40 # size ~12M
-
-for n in ncoords:
-    choosen_coords = many_coords[0:int(n)]
-    start_time = time.perf_counter()
-    results = geo.query(choosen_coords)
-    time_elapsed = time.perf_counter() - start_time
-    print('{} & {:.2f}'.format(n, time_elapsed)) 
-
-# IMPORTANTE
-# Queda probado que, aun con los 4.7M de filas del csv personalizado que le 
-# hemos pasado a reverse:geocoder, la performance sigue siendo buenísima:
-# 12.8 segundos para 10M de coordenadas.
-
-########################################
-# LO ANTERIOR, TODO, ES UN POCO... MEH #
-########################################
 
 ###################################
 # TESTEANDO CON LA MUESTRA DEL BS #
 ###################################
 
-# Lo suyo sería testearlo con la librería por defecto y luego meterle el 
-# allCountries como base de datos y quizá cambiar la distancia euclídea.
-
-#%% CON allCountries COMO BASE DE DATOS
-### BORRAR TODA ESTA CELDA CUANDO YA NO ME HAGA FALTA PORQUE LO QUE APERECE 
-### ESTÉ EN LA SIGUIENTE CELDA.
-
-# Testear reverese_geocoder con allCountries_stream.csv como base de datos.
-# Utilizo la muestra del BS, obtengo lo cc con reverse_geocoder y con REST 
-# requests a la api de geonames. Luego compruebo cuántas coinciden.
-
-# LEER DATOS Y PASAR A LISTA DE TUPLAS LAS COORDS
-sample_bs = pd.read_csv('Sample_BS.csv', index_col=0, sep=';', usecols=[0,1,2])
-sample_bs.rename({'latitud_ga':'latitude','longitud_ga':'longitude'}, 
-                 axis='columns', inplace=True)
-
-coords = sample_bs.to_numpy(copy=True).tolist()
-coords = [tuple(i) for i in coords]
-
-# REVERSE_GEOCODER
-stream = io.StringIO(open('allCountries_stream.csv', encoding='utf-8').read())
-geo = rg.RGeocoder(mode=2, verbose=True, stream=stream)
-results = geo.query(coords)
-results = pd.DataFrame(results).cc
-
-results.value_counts() # Only 1283 not in Spain
-outspain = results.loc[results!='ES',:]
-inspain = results.loc[results=='ES',:].iloc[0:1283,:]
-dftest = pd.concat([inspain, outspain])
-
-# REQUESTS TO GEONAMES
-def get_cc(row):
-    params = {'lat':row['lat'],'lng':row['lon'],'username':'marcoscastillo'}
-    req = requests.get("http://api.geonames.org/countryCode", params=params)
-    return req.text.strip()
-
-getcc0_999 = dftest.iloc[:1000,:].apply(get_cc, axis='columns')
-getcc1000_1999 = dftest.iloc[1000:2000,:].apply(get_cc, axis='columns')
-getcc2000_2566 = dftest.iloc[2000:,:].apply(get_cc, axis='columns')
-getcc0_2566 = pd.concat([getcc0_999, getcc1000_1999, getcc2000_2566])
-getcc0_2566.to_pickle('getcc0_2566.pkl')
-
-# CHECK ACCURACY
-getcc0_2566 = pd.read_pickle('getcc0_2566.pkl')
-
-different = dftest.cc.to_numpy() != getcc0_2566.to_numpy()
-np.mean(different) # .007
-np.sum(different) # 17/2566
-# From the 17 errors, 14 come from different kind of errors:  
-# ERR:15:no country code found, ERROR: canceling statement due to statement 
-# timeout. The other 3 are actual errors: in the border between PT and ES, and
-# FR and BE. So the accuracy is even better. 
-
-# ¿Dónde están los errores?
-dftest['ccapi'] = getcc0_2566
-dftest.loc[different, ['lat','lon']]
-dftest.loc[different, ['cc','ccapi']]
-# Busco las coordenadas en Google Maps para salir de dudas: ¿son errores?
-# V 40.61667, 0.6  ES
-# V 42.03333, -8.65 ES
-# V 36.59389, -6.23298 ES
-# V -5.7333300000000005, 39.28333 TZ
-# V -33.86847, 151.20033999999998 AU
-# F (OCEAN) 0.251, 0.7794 YE
-# V 18.433329999999998, -69.68333 DO
-# V 10.20117, -64.68108000000001 VE
-# F (ES) 42.056090000000005, -8.56749 PT
-# V -16.501479999999997, -151.72135 PF
-# F (OCEAN) 0.251, 0.7794 YE
-# V 11.99928, 102.29564 TH
-# V -2.2602700000000002, -79.86536 EC
-# V 11.07567, -63.827909999999996 VE
-# F (OCEAN) 0.251, 0.7794 YE
-# V 10.609960000000001, -67.01039 VE
-# F (FR) 50.4441, 3.65938 BE
-# NOTE: the OCEAN coords are repeated 3 times: only 1 counts.
-# ACTUAL ERRORS: 3/2566, 0.00117 TER.
-
 #%% REQUESTS API GEONAMES
 
-# Función para sacar el conutry code 'cc' de dos letras.
-# Usernames: marcoscastillo, marcoscastevez, mascosestevez
+# Función para sacar el country code 'cc' de dos letras.
 def get_cc(row):
-    params = {'lat':row['latitude'],'lng':row['longitude'],
+    params = {'lat':row['latitud_ga'],'lng':row['longitud_ga'],
               'username':'marcoscastillo'}
     req = requests.get("http://api.geonames.org/countryCode", params=params)
     return req.text.strip()
 
-def get_cc_2(row):
-    params = {'lat':row['latitude'],'lng':row['longitude'],
-              'username':'marcoscastevez'}
-    req = requests.get("http://api.geonames.org/countryCode", params=params)
-    return req.text.strip()
-
-def get_cc_3(row):
-    params = {'lat':row['latitude'],'lng':row['longitude'],
-              'username':'mascosestevez'}
-    req = requests.get("http://api.geonames.org/countryCode", params=params)
-    return req.text.strip()
-
-def get_cc_4(row):
-    params = {'lat':row['latitude'],'lng':row['longitude'],
-              'username':'mellamomarcos'}
-    req = requests.get("http://api.geonames.org/countryCode", params=params)
-    return req.text.strip()
-
-
-# Cargamos la muestra de BS y la barajamos de forma aleatoria. Como quizá no
-# hagamos requests con las 48k instancias, si lo hacemos a submuestras, estas 
-# deben ser aleatorias.
 sample = pd.read_csv('Sample_BS.csv', index_col=0, sep=';', usecols=[0,1,2])
-sample.rename({'latitud_ga':'latitude','longitud_ga':'longitude'}, 
-                 axis='columns', inplace=True)
-np.random.seed(0)
-permut = np.random.permutation(sample.shape[0])
-sample_shuffled = sample.iloc[permut,:]
 
-
-# USER marcoscastillo (CONSOLE 2)
-for i in np.arange(28000,34000,1000):
+# Generate all the country codes
+for i in np.arange(0,48000,1000):
     time_start = time.time()
-    print(i)
-    getcc = sample_shuffled.iloc[i:i+1000,:].apply(get_cc, axis='columns')    
+    getcc = sample.iloc[i:i+1000,:].apply(get_cc, axis='columns')    
     getcc.to_pickle('getcc{}_{}.pkl'.format(i,i+1000))
     print('Computed untill {} row'.format(i+1000))
     
@@ -369,59 +228,74 @@ for i in np.arange(28000,34000,1000):
     print('Sleeping {} mins and {} secs'.format(int(whole), int(frac*60)))
     time.sleep(time_sleep)
 
-# USER marcoscastevez (CONSOLE 3)
-for i in np.arange(23000,34000,1000):
-    time_start = time.time()
-    print(i)
-    getcc = sample_shuffled.iloc[i:i+1000,:].apply(get_cc_2, axis='columns')    
-    getcc.to_pickle('getcc{}_{}.pkl'.format(i,i+1000))
-    print('Computed untill {} row'.format(i+1000))
+getcc2 = sample.iloc[48000:48475,:].apply(get_cc, axis='columns')
+getcc = pd.read_pickle('getcc0_48000.pkl')
+getcc = pd.concat([getcc,getcc2])
+getcc.to_pickle('getcc0_48000.pkl')
     
-    time_sleep = 3600 - (time.time() - time_start)/3
-    frac, whole = math.modf(time_sleep/60)
-    print(datetime.datetime.now())
-    print('Sleeping {} mins and {} secs'.format(int(whole), int(frac*60)))
-    time.sleep(time_sleep)
-    
-# USER mascosestevez (CONSOLE 4)
-for i in np.arange(34000,48000,1000):
-    time_start = time.time()
-    print(i)
-    getcc = sample_shuffled.iloc[i:i+1000,:].apply(get_cc_3, axis='columns',)    
-    getcc.to_pickle('getcc{}_{}.pkl'.format(i,i+1000))
-    print('Computed untill {} row'.format(i+1000))
-    
-    time_sleep = 3600 - (time.time() - time_start)/3
-    frac, whole = math.modf(time_sleep/60)
-    print(datetime.datetime.now())
-    print('Sleeping {} mins and {} secs'.format(int(whole), int(frac*60)))
-    time.sleep(time_sleep)
-    
-# USER mellamomarcos (CONSOLE 5)
-for i in np.arange(42000,48000,1000):
-    time_start = time.time()
-    print(i)
-    getcc = sample_shuffled.iloc[i:i+1000,:].apply(get_cc_4, axis='columns')    
-    getcc.to_pickle('getcc{}_{}.pkl'.format(i,i+1000))
-    print('Computed untill {} row'.format(i+1000))
-    
-    time_sleep = 3600 - (time.time() - time_start)/3
-    frac, whole = math.modf(time_sleep/60)
-    print(datetime.datetime.now())
-    print('Sleeping {} mins and {} secs'.format(int(whole), int(frac*60)))
-    time.sleep(time_sleep)
 
     
-#%% TESTEAR CON CITIES1000
+#%% TESTS
+sample = pd.read_csv('Sample_BS.csv', index_col=0, sep=';', usecols=[0,1,2])
+results_gn = pd.read_pickle('getcc0_48475.pkl')
 
-b = pd.Series(dtype=str)    
-for i in np.arange(0,17000,1000):
-    a = pd.read_pickle('getcc{}_{}.pkl'.format(i,i+1000))
-    b = pd.concat([b,a])
-    
-coords = subsample_20k.to_numpy(copy=True).tolist()
+# Para ver la distribución de países con variable explorer
+cc_distrib = results_gn.value_counts()
+
+# number of no result (ERROR) answer
+n_errors = np.sum(results_gn.apply(lambda cc: len(cc)!=2))
+results_gn = results_gn.to_numpy()
+
+coords = sample[['latitud_ga','longitud_ga']].to_numpy().tolist()
 coords = [tuple(i) for i in coords]
 
+# CON DATOS POR DEFECTO
 results_rg = rg.search(coords)
-results_rg = pd.DataFrame(results_rg).cc
-results_rg = results_rg[:17000]
+results_rg = pd.DataFrame(results_rg).cc.to_numpy()
+
+n_rg_errors = np.sum(results_rg != results_gn) - n_errors 
+print(n_rg_errors) # 35
+
+rg_accuracy = n_rg_errors / (results_rg.size - n_errors)
+print(rg_accuracy) # 0.0007
+
+# CON allCountries 'adaptado'
+stream = io.StringIO(open('allCountries_stream.csv', encoding='utf-8').read())
+geo = rg.RGeocoder(mode=2, verbose=True, stream=stream)
+results_rg2 = geo.query(coords)
+results_rg2 = pd.DataFrame(results_rg2).cc.to_numpy()
+
+n_rg2_errors = np.sum(results_rg2 != results_gn) - n_errors 
+print(n_rg2_errors) # 35
+
+rg2_accuracy = n_rg2_errors / (results_rg2.size - n_errors)
+print(rg2_accuracy) # 0.0007
+
+# CON allCountries crudo
+stream = io.StringIO(open('allCountries_stream_bigger.csv', 
+                          encoding='utf-8').read())
+geo = rg.RGeocoder(mode=2, verbose=True, stream=stream)
+results_rg3 = geo.query(coords)
+results_rg3 = pd.DataFrame(results_rg3).cc.to_numpy()
+
+n_rg2_errors = np.sum(results_rg3 != results_gn) - n_errors 
+print(n_rg2_errors) # 35
+
+rg2_accuracy = n_rg2_errors / (results_rg3.size - n_errors)
+print(rg2_accuracy) # 0.0007
+
+# ¿DAN AMBOS EXACTAMENTE LOS MISMOS RESULTADOS?
+np.sum(results_rg!=results_rg2)
+# Sí, los resultados son los mismos.
+
+# POR QUÉ SUCEDEN LOS ERRORES
+e_gn = results_gn[results_rg != results_gn].reshape(99,1)
+e_rg = results_rg[results_rg != results_gn].reshape(99,1)
+concat = np.concatenate((e_gn, e_rg), axis=1)
+
+concat = concat.tolist()
+concat = [mylist[0] + "-" +mylist[1] for mylist in concat]
+concat = pd.Series(concat)
+error_types = concat.value_counts()
+# Con el explorador de variables de spyder veo los errores más frecuentes.
+# Confundir ES con GB, FR, PT los que más.
